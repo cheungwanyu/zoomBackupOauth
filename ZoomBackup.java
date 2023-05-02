@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -13,7 +14,15 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Scanner;
 
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHeaders;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 public class ZoomRecorder {
@@ -25,19 +34,33 @@ public class ZoomRecorder {
     public static void main(String[] args) throws Exception {
     	Scanner myObj = new Scanner(System.in);  // Create a Scanner object
     	
-    	System.out.println("Enter User ID");
+    	System.out.println("Enter Email Address");
         USER_ID = myObj.nextLine();  // Read user input
         
-        System.out.println("Enter Oauth token");
-        OAUTH_TOKEN = myObj.nextLine();  // Read user input
+        System.out.println("Enter accountId");
+        String accountId  = myObj.nextLine();  // Read user input
+        
+        System.out.println("Enter clientId");
+        String clientId  = myObj.nextLine();  // Read user input
+        
+        System.out.println("Enter client secret");
+        String clientSecret  = myObj.nextLine();  // Read user input
+        
+        OAUTH_TOKEN = getServerSideAuthToken(accountId, clientId, clientSecret);
         
         System.out.println("Enter PATH");
         PATH = myObj.nextLine();  // Read user input
     	
-    	System.out.println("Start");
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    	
 
-        for (int year = 2023; year <= 2023; year++) {
+        System.out.println("Enter search range e.g. 2022-2023");
+        String searchYears = myObj.nextLine();
+        int startYear = Integer.parseInt(searchYears.split("-")[0]);
+        int endYear = Integer.parseInt(searchYears.split("-")[1]);
+        
+        System.out.println("Start");
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        for (int year = startYear; year <= endYear; year++) {
             for (int month = 1; month <= 12; month++) {
                 LocalDate startDate = LocalDate.of(year, month, 1);
                 LocalDate endDate = startDate.plusMonths(1);
@@ -45,7 +68,7 @@ public class ZoomRecorder {
                 if (month == 12) {
                     endDate = LocalDate.of(year + 1, 1, 1);
                 }
-
+                System.out.println("Searching : "+year+"-"+month);
                 getRecordings(startDate.format(formatter), endDate.format(formatter), PATH);
             }
         }
@@ -112,5 +135,27 @@ public class ZoomRecorder {
         outputStream.close();
         inputStream.close();
         System.out.println("Downloaded : "+filename);
+    }
+    
+    public static String getServerSideAuthToken(String accountId, String clientId, String clientSecret) throws IOException, JSONException {
+        HttpClient httpClient = HttpClients.createDefault();
+
+        HttpPost httpPost = new HttpPost("https://zoom.us/oauth/token?grant_type=account_credentials&account_id="+accountId);
+        String auth = clientId + ":" + clientSecret;
+        byte[] encodedAuth = java.util.Base64.getEncoder().encode(auth.getBytes());
+        String authHeader = "Basic " + new String(encodedAuth);
+        httpPost.setHeader(HttpHeaders.AUTHORIZATION, authHeader);
+        httpPost.setHeader(HttpHeaders.CONTENT_TYPE, "application/json");
+
+        HttpResponse response = httpClient.execute(httpPost);
+        HttpEntity entity = response.getEntity();
+
+        if (entity != null) {
+            String responseBody = EntityUtils.toString(entity, "UTF-8");
+            JSONObject json = new JSONObject(responseBody);
+            String authToken = json.getString("access_token");
+            return authToken;
+        }
+        return null;
     }
 }
