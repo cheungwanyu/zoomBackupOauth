@@ -1,8 +1,9 @@
 package zoom_recording;
 
 import java.io.BufferedReader;
-import java.io.DataInputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,7 +12,11 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.Year;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
 import java.util.Scanner;
 
 import org.apache.http.HttpEntity;
@@ -26,37 +31,66 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 public class ZoomRecorder {
-
-    private static String OAUTH_TOKEN = "";
-    private static String USER_ID = "zoom1@fll.cc";
-    private static String PATH = "";
-
     public static void main(String[] args) throws Exception {
-    	Scanner myObj = new Scanner(System.in);  // Create a Scanner object
+    	ZoomRecorder zoom = new ZoomRecorder();
+    	zoom.getInput(args);
     	
-    	System.out.println("Enter Email Address");
-        USER_ID = myObj.nextLine();  // Read user input
+    	int count = 0;
+    	int maxTries = 10;
+    	while(true) {
+    		try {
+        		zoom.run();
+        		break;
+        	} catch(Exception e) {
+        		System.out.println("ERROR "+count+"/"+maxTries);
+        		if (++count == maxTries) throw e;
+        	}
+    	}
+    }
+    
+    private String accountId;
+    private String clientId;
+    private String clientSecret;
+    private String path;
+    private String oauth_token;
+    private List<String> emails = new ArrayList<String>();
+    private int startYear;
+    private int endYear;
+    
+    public void getInput(String[] args) {
+        String emailString = args[0];
+        System.out.println("Email addresses to be downloaded : " + emailString);
         
-        System.out.println("Enter accountId");
-        String accountId  = myObj.nextLine();  // Read user input
+        if(emailString != null) {
+        	if(!emailString.contains(";")) {
+        		emails.add(emailString);
+        	} else {
+        		for(String email : emailString.split(";")) {
+        			emails.add(email);
+        		}
+        	}
+        }
         
-        System.out.println("Enter clientId");
-        String clientId  = myObj.nextLine();  // Read user input
+        accountId  = args[1];
+        System.out.println("accountId : " + accountId);
         
-        System.out.println("Enter client secret");
-        String clientSecret  = myObj.nextLine();  // Read user input
+        clientId  = args[2];
+        System.out.println("clientId : " + clientId);
         
-        OAUTH_TOKEN = getServerSideAuthToken(accountId, clientId, clientSecret);
+        clientSecret = args[3];
+        System.out.println("client secret : " + clientSecret);
         
-        System.out.println("Enter PATH");
-        PATH = myObj.nextLine();  // Read user input
-    	
-    	
-
-        System.out.println("Enter search range e.g. 2022-2023");
-        String searchYears = myObj.nextLine();
-        int startYear = Integer.parseInt(searchYears.split("-")[0]);
-        int endYear = Integer.parseInt(searchYears.split("-")[1]);
+        path = args[4];
+        System.out.println("PATH : " + path);
+        
+        int thisYear = Year.now().getValue();
+        startYear = thisYear-1;
+        endYear = thisYear;
+        System.out.println("Search " + startYear + " to " + endYear);
+    }
+    
+    public void run() throws Exception {
+        oauth_token = getServerSideAuthToken();
         
         System.out.println("Start");
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -69,18 +103,20 @@ public class ZoomRecorder {
                     endDate = LocalDate.of(year + 1, 1, 1);
                 }
                 System.out.println("Searching : "+year+"-"+month);
-                getRecordings(startDate.format(formatter), endDate.format(formatter), PATH);
+                for(String email : emails)
+                	getRecordings(startDate.format(formatter), endDate.format(formatter), email);
             }
         }
         System.out.println("End");
     }
 
-    private static void getRecordings(String fromDate, String toDate, String path) throws Exception {
-        String urlStr = "https://api.zoom.us/v2/users/" + USER_ID + "/recordings?from=" + fromDate + "&to=" + toDate + "&page_size=300";
+    private void getRecordings(String fromDate, String toDate, String email) throws Exception {
+    	System.out.println("Email : "+ email);
+        String urlStr = "https://api.zoom.us/v2/users/" + email + "/recordings?from=" + fromDate + "&to=" + toDate + "&page_size=300";
         URL url = new URL(urlStr);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
-        conn.setRequestProperty("Authorization", "Bearer " + OAUTH_TOKEN);
+        conn.setRequestProperty("Authorization", "Bearer " + oauth_token);
         conn.setRequestProperty("Content-Type", "application/json");
 
         InputStream inputStream = conn.getInputStream();
@@ -107,24 +143,53 @@ public class ZoomRecorder {
         	JSONArray recordingFiles = meeting.getJSONArray("recording_files");
 
             for (int j=0 ; j < recordingFiles.length() ; j++) {
+            	/* Create Meetings folder */
+            	String folderPath = path+this.reformatPath(meeting.getString("start_time"))+ " "+ this.reformatPath(meeting.getString("topic"));
+            	File theDir = new File(folderPath);
+            	if(!theDir.exists())
+            		theDir.mkdir();
+            	
             	System.out.println("Recording: "+(j+1)+" / " + recordingFiles.length());
             	JSONObject recording = recordingFiles.getJSONObject(j);
                 if (recording.getString("status").equals("completed")) {
                 	String fileName = recording.getString("recording_start").replace(":", "-")+meeting.getString("topic")+"-"+j;
-                    downloadRecording(recording.getString("download_url"), fileName , path);
+                    downloadRecording(recording.getString("download_url"), fileName, folderPath+"/");
                 }
             }
         }
     }
+    
+    private String reformatPath(String path) {
+    	path = path.replaceAll("/", "");
+    	path = path.replaceAll("\\\\", "");
+    	path = path.replaceAll("|", "");
+    	path = path.replaceAll(":", "");
+    	path = path.replaceAll("\\?", "");
+    	path = path.replaceAll("\"", "");
+    	path = path.replaceAll("<", "");
+    	path = path.replaceAll(">", "");
+    	path = path.replaceAll("|", "");
+    	path = path.replaceAll("\\s+$", "");
+    	return path;
+    }
 
-    private static void downloadRecording(String downloadUrl, String filename, String path) throws Exception {
+    private void downloadRecording(String downloadUrl, String filename, String folderPath) throws Exception {
+    	/* Check if file existing */
+    	String filePath = folderPath + this.reformatPath(filename) + ".mp4";
+    	File file = new File(filePath);
+    	if(file.exists()) {
+    		System.out.println("file eixsting : "+filename);
+    		return;
+    	}
+    	
+    	
     	System.out.println("Downlaoding : "+filename);
-        URL url = new URL(downloadUrl + "?access_token=" + OAUTH_TOKEN);
+        URL url = new URL(downloadUrl + "?access_token=" + oauth_token);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setRequestProperty("Content-Type", "video/mp4");
         InputStream inputStream = conn.getInputStream();
-        FileOutputStream outputStream = new FileOutputStream(path + filename + ".mp4");
+        FileOutputStream outputStream = new FileOutputStream(filePath);
         byte[] buffer = new byte[4096];
         int bytesRead = -1;
 
@@ -137,7 +202,7 @@ public class ZoomRecorder {
         System.out.println("Downloaded : "+filename);
     }
     
-    public static String getServerSideAuthToken(String accountId, String clientId, String clientSecret) throws IOException, JSONException {
+    public String getServerSideAuthToken() throws IOException, JSONException {
         HttpClient httpClient = HttpClients.createDefault();
 
         HttpPost httpPost = new HttpPost("https://zoom.us/oauth/token?grant_type=account_credentials&account_id="+accountId);
