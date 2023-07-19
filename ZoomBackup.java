@@ -152,7 +152,7 @@ public class ZoomRecorder {
             	System.out.println("Recording: "+(j+1)+" / " + recordingFiles.length());
             	JSONObject recording = recordingFiles.getJSONObject(j);
                 if (recording.getString("status").equals("completed")) {
-                	String fileName = recording.getString("recording_start").replace(":", "-")+meeting.getString("topic")+"-"+j;
+                	String fileName = recording.getString("recording_start").replace(":", "-")+meeting.getString("topic")+ "-"+recording.getString("recording_type") +"-"+j;
                     downloadRecording(recording.getString("download_url"), fileName, folderPath+"/");
                 }
             }
